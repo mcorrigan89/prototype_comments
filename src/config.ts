@@ -31,5 +31,6 @@ export function readConfig(pre: PreConfig = {}, script: HTMLScriptElement | null
     shortcuts: (data.shortcuts ?? String(pre.shortcuts ?? true)) !== 'false',
     endpoint: data.endpoint || pre.endpoint,
     notion,
+    toolbar: data.toolbar || pre.toolbar,
   };
 }

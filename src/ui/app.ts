@@ -5,6 +5,15 @@ import { createComposer } from './composer';
 import { avatar, h, renderBody } from './dom';
 import { COMMENT_CURSOR, icon } from './icons';
 import { promptForName, promptForSignIn } from './modal';
+import {
+  DEFAULT_TOOLBAR_POSITION,
+  isToolbarPosition,
+  loadToolbarPosition,
+  makeDraggable,
+  saveToolbarPosition,
+  stepPosition,
+  type ToolbarPosition,
+} from './toolbar-position';
 import { createSidebar, type Sidebar } from './sidebar';
 import css from './styles.css?inline';
 
@@ -35,6 +44,7 @@ interface State {
   draft: { pin: Pin } | null;
   hoverEl: Element | null;
   modalOpen: boolean;
+  toolbarPosition: ToolbarPosition;
 }
 
 export class App {
@@ -77,6 +87,7 @@ export class App {
       draft: null,
       hoverEl: null,
       modalOpen: false,
+      toolbarPosition: loadToolbarPosition() ?? (isToolbarPosition(config.toolbar) ? config.toolbar : DEFAULT_TOOLBAR_POSITION),
     };
 
     this.host = document.createElement('pc-overlay');
@@ -468,8 +479,27 @@ export class App {
       badge,
     );
     const me = h('button', { class: 'tb-btn me', type: 'button', title: 'Your name', 'aria-label': 'Your name', onClick: () => void this.ensureUserOrRename() });
-    const el = h('div', { class: 'toolbar', role: 'toolbar', 'aria-label': 'Comments' }, comment, eye, list, h('span', { class: 'tb-sep' }), me);
+    const grip = h(
+      'button',
+      { class: 'tb-grip', type: 'button', title: 'Drag to move (or use arrow keys)', 'aria-label': 'Move toolbar' },
+      icon('grip', 16),
+    );
+    grip.addEventListener('keydown', (e) => {
+      const next = stepPosition(this.state.toolbarPosition, e.key);
+      if (next === this.state.toolbarPosition) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this.setToolbarPosition(next);
+    });
+    const el = h('div', { class: 'toolbar', role: 'toolbar', 'aria-label': 'Comments' }, grip, comment, eye, list, h('span', { class: 'tb-sep' }), me);
+    makeDraggable(el, grip, (position) => this.setToolbarPosition(position));
     return { el, comment, eye, list, badge, me };
+  }
+
+  setToolbarPosition(position: ToolbarPosition) {
+    this.state.toolbarPosition = position;
+    saveToolbarPosition(position);
+    this.renderToolbar();
   }
 
   private async ensureUserOrRename() {
@@ -487,6 +517,9 @@ export class App {
     me.replaceChildren(this.state.user ? avatar(this.state.user, 22) : icon('user', 18));
     me.title = this.state.user ? `Commenting as ${this.state.user.name}` : this.store.auth === 'signin' ? 'Sign in to comment' : 'Set your name';
     el.classList.toggle('shifted', this.state.sidebarOpen && window.innerWidth >= 720);
+    el.dataset.pos = this.state.toolbarPosition;
+    // The hint and toasts go on the opposite edge from the toolbar, so they never overlap it.
+    this.root.classList.toggle('toolbar-top', this.state.toolbarPosition.startsWith('top'));
   }
 
   private renderPins() {

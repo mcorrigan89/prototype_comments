@@ -36,6 +36,7 @@ A browser-only mode with no backend is also available: use `data-storage="local"
 | Show / hide pins | **Shift+C** |
 | All comments | The list button in the toolbar. Filter by page and by Open/Resolved |
 | Sign in / out, sync status, export | The sidebar footer |
+| Move the toolbar out of the way | Drag its ⠿ handle; it snaps to the nearest corner or edge. Each reviewer's choice is remembered |
 
 While comment mode is on, clicks don't reach the prototype, so buttons and links won't fire.
 
@@ -51,6 +52,7 @@ Set these on the script tag:
 | `data-project` | hostname | Groups comments in `local` mode. |
 | `data-page-key` | `path` | Set to `path+hash` if the prototype uses hash routing (`#/checkout`). |
 | `data-shortcuts` | `true` | Set to `false` if the prototype uses the **C** key itself. |
+| `data-toolbar` | `bottom-center` | Where the toolbar starts: `top-` or `bottom-` + `left`, `center` or `right`. |
 
 With Notion, the people you can @mention are your workspace's members. In `local` mode, set them before the script loads:
 

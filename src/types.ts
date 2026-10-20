@@ -148,4 +148,6 @@ export interface Config {
   shortcuts: boolean;
   endpoint?: string;
   notion?: string;
+  /** Where the toolbar starts, e.g. "bottom-right". Reviewers can drag it elsewhere. */
+  toolbar?: string;
 }

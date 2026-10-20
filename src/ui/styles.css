@@ -534,8 +534,6 @@ textarea:focus-visible {
 
 .toolbar {
   position: fixed;
-  left: 50%;
-  bottom: 16px;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -544,12 +542,56 @@ textarea:focus-visible {
   background: var(--chrome);
   color: var(--chrome-fg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
-  transform: translateX(-50%);
-  transition: left 0.2s ease;
+  transition: left 0.2s ease, right 0.2s ease;
   pointer-events: auto;
 }
-.toolbar.shifted {
+
+/* The six snap spots (data-pos is set from the toolbar position). */
+.toolbar[data-pos^='top'] {
+  top: 16px;
+}
+.toolbar[data-pos^='bottom'] {
+  bottom: 16px;
+}
+.toolbar[data-pos$='left'] {
+  left: 16px;
+}
+.toolbar[data-pos$='right'] {
+  right: 16px;
+}
+.toolbar[data-pos$='center'] {
+  left: 50%;
+  transform: translateX(-50%);
+}
+/* Keep clear of the open sidebar. */
+.toolbar.shifted[data-pos$='center'] {
   left: calc(50% - 170px);
+}
+.toolbar.shifted[data-pos$='right'] {
+  right: 356px;
+}
+.toolbar.dragging {
+  transition: none;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4);
+}
+
+.tb-grip {
+  height: 32px;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.45);
+  cursor: grab;
+  touch-action: none;
+}
+.tb-grip:hover {
+  color: var(--chrome-fg);
+  background: rgba(255, 255, 255, 0.08);
+}
+.toolbar.dragging .tb-grip {
+  cursor: grabbing;
 }
 .tb-btn {
   height: 32px;
@@ -622,6 +664,15 @@ textarea:focus-visible {
 .toast.show {
   opacity: 1;
   transform: translate(-50%, 0);
+}
+/* Toolbar at the top: the hint moves to the bottom, toasts appear just under the toolbar. */
+.root.toolbar-top .hint {
+  top: auto;
+  bottom: 12px;
+}
+.root.toolbar-top .toast {
+  bottom: auto;
+  top: 64px;
 }
 
 .modal-backdrop {
