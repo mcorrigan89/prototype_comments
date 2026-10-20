@@ -4,3 +4,4 @@ dist
 server/dist
 .env
 .data
+site
