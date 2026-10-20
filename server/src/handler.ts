@@ -14,7 +14,11 @@ import { nowSeconds, sign, verify } from './session';
 
 export interface AppConfig {
   sessionSecret: string;
-  /** Origins (scheme://host[:port]) of the prototypes allowed to call the API and receive tokens. */
+  /**
+   * Origins (scheme://host[:port]) of the prototypes allowed to call the API and
+   * receive sign-in tokens. `*` matches one part of a hostname (letters, digits,
+   * dashes; never a dot), e.g. http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com
+   */
   allowedOrigins: string[];
   /** Feedback databases (Notion ids) whose comments can only be read after signing in. */
   privateDatabases: Set<string>;
@@ -49,8 +53,10 @@ export function createHandler({ workspace, identity, config }: AppDeps): Handler
 
   // ---------- helpers ----------
 
+  const originMatchers = config.allowedOrigins.map(originMatcher);
+
   function isAllowedOrigin(origin: string | undefined): origin is string {
-    return !!origin && config.allowedOrigins.includes(origin);
+    return !!origin && originMatchers.some((matches) => matches(origin));
   }
 
   function corsHeaders(origin: string | undefined): Record<string, string> {
@@ -385,6 +391,13 @@ export function createHandler({ workspace, identity, config }: AppDeps): Handler
     }
     return { ...res, headers: { ...res.headers, ...cors } };
   };
+}
+
+/** Exact match, or a pattern where `*` stands for one hostname part (never crossing a dot). */
+export function originMatcher(allowed: string): (origin: string) => boolean {
+  if (!allowed.includes('*')) return (origin) => origin === allowed;
+  const re = new RegExp(`^${allowed.split('*').map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[a-z0-9-]+')}$`, 'i');
+  return (origin) => re.test(origin);
 }
 
 function page(title: string, content: string): string {

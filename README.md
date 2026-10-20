@@ -99,7 +99,7 @@ With no `.env`, the backend uses **fake Notion**: data is kept in `.data/fake-no
   npm run worker:deploy      # prints the backend URL → use it as data-endpoint
   npm run worker:dev         # the Worker in Cloudflare's local runtime, on :8788, using .env
   ```
-  Set `ALLOWED_ORIGINS` in `wrangler.jsonc` to your prototypes' origins. Set the OAuth connection's redirect URI to `<backend URL>/auth/callback`.
+  Set `ALLOWED_ORIGINS` in `wrangler.jsonc` to your prototypes' origins. A `*` matches one part of a hostname, so auto-generated buckets can be allowed by naming convention: `http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com`. Anyone can create a bucket that fits such a pattern, so moving prototypes to a domain you own is the stronger option long term. Set the OAuth connection's redirect URI to `<backend URL>/auth/callback`.
 - **AWS Lambda** later: `server/src/lambda.ts` is the same handler behind a Lambda Function URL (`npm run build:server` → `server/dist/`).
 
 ### How data flows

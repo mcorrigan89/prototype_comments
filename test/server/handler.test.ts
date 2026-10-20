@@ -166,3 +166,26 @@ describe('CORS', () => {
     expect(start.headers!.location.startsWith(`${API}/auth/fake?`)).toBe(true);
   });
 });
+
+describe('allowed origin patterns', () => {
+  it('matches one hostname part per *, and nothing else', async () => {
+    const { originMatcher } = await import('../../server/src/handler');
+    const allowed = originMatcher('http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com');
+    expect(allowed('http://govwell-icc-valuation-prototype.s3-website.us-east-2.amazonaws.com')).toBe(true);
+    expect(allowed('http://govwell-x-prototype.s3-website.us-east-2.amazonaws.com')).toBe(true);
+    expect(allowed('https://govwell-x-prototype.s3-website.us-east-2.amazonaws.com')).toBe(false); // scheme
+    expect(allowed('http://govwell-x-prototype.s3-website.us-west-1.amazonaws.com')).toBe(false); // region
+    expect(allowed('http://govwell-x.evil.com-prototype.s3-website.us-east-2.amazonaws.com')).toBe(false); // dots
+    expect(allowed('http://govwell--prototype.s3-website.us-east-2.amazonaws.com')).toBe(false); // empty
+    expect(allowed('http://govwell-x-prototype.s3-website.us-east-2.amazonaws.com.evil.com')).toBe(false); // suffix
+    expect(originMatcher('https://a.test')('https://a.test')).toBe(true);
+  });
+
+  it('applies patterns to sign-in redirects too', async () => {
+    const { call } = setup({ config: { allowedOrigins: ['http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com'] } });
+    const ok = await call('GET', `/auth/start?return=${encodeURIComponent('http://govwell-icc-valuation-prototype.s3-website.us-east-2.amazonaws.com/')}`);
+    expect(ok.status).toBe(302);
+    const bad = await call('GET', `/auth/start?return=${encodeURIComponent('http://other-bucket.s3-website.us-east-2.amazonaws.com/')}`);
+    expect(bad.status).toBe(403);
+  });
+});
