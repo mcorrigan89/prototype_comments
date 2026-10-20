@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildApp } from '../../server/src/app';
+import { MemoryWorkspace } from '../../server/src/stores/memory';
+
+const fakeWorkspace = () => new MemoryWorkspace();
 
 // Every key from .env.example, left blank, as in a freshly copied .env.
 const blankEnv = {
@@ -15,14 +18,14 @@ const blankEnv = {
 
 describe('buildApp', () => {
   it('starts in dev from a freshly copied, blank .env', async () => {
-    const { handler, mode } = buildApp(blankEnv, { dev: true });
+    const { handler, mode } = buildApp(blankEnv, { dev: true, fakeWorkspace });
     expect(mode).toEqual({ store: 'fake', identity: 'fake' });
     const res = await handler({ method: 'OPTIONS', path: '/threads', query: new URLSearchParams(), headers: { origin: 'http://localhost:5173' } });
     expect(res.headers?.['access-control-allow-origin']).toBe('http://localhost:5173');
   });
 
   it('uses dev sign-in with a real token but no public integration', () => {
-    expect(buildApp({ ...blankEnv, NOTION_TOKEN: 'ntn_test' }, { dev: true }).mode).toEqual({ store: 'notion', identity: 'fake' });
+    expect(buildApp({ ...blankEnv, NOTION_TOKEN: 'ntn_test' }, { dev: true, fakeWorkspace }).mode).toEqual({ store: 'notion', identity: 'fake' });
   });
 
   it('refuses to start in production without real configuration', () => {

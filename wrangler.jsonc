@@ -1,0 +1,18 @@
+// Cloudflare Workers config for the backend. Deploy with `npm run worker:deploy`.
+// Secrets (NOTION_TOKEN, NOTION_CLIENT_ID, NOTION_CLIENT_SECRET, SESSION_SECRET) are NOT here:
+// upload them with `npm run worker:secrets`.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "prototype-comments",
+  "main": "server/src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // node:crypto (HMAC session tokens) and Buffer.
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    // Origins of the prototypes allowed to use the backend and receive sign-in tokens.
+    // Add your S3 website origin(s) here, comma-separated.
+    "ALLOWED_ORIGINS": "https://mcorrigan89.github.io",
+    "PRIVATE_DATABASES": ""
+  }
+}

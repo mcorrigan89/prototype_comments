@@ -5,3 +5,5 @@ server/dist
 .env
 .data
 site
+.dev.vars
+.wrangler

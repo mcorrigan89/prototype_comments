@@ -2,7 +2,6 @@ import { createHandler, type AppConfig } from './handler';
 import type { Handler } from './http';
 import { fakeIdentity, notionIdentity } from './identity';
 import type { Identity, Workspace } from './ports';
-import { FAKE_USERS, MemoryWorkspace } from './stores/memory';
 import { NotionWorkspace } from './stores/notion';
 
 type Env = Record<string, string | undefined>;
@@ -14,10 +13,13 @@ const list = (value: string | undefined) =>
     .filter(Boolean);
 
 export interface BuildOptions {
-  /** Allow fake Notion and a default session secret. Only for local development. */
+  /** Allow fake Notion, pick-a-person sign-in and a default session secret. Only for local development. */
   dev?: boolean;
-  /** Where fake Notion persists its data in dev. */
-  fakeDataFile?: string;
+  /**
+   * Fake Notion, used in dev when there's no NOTION_TOKEN. Passed in rather than
+   * imported, so production bundles (Lambda, Workers) never include it or its file access.
+   */
+  fakeWorkspace?: () => Workspace;
 }
 
 export interface BuiltApp {
@@ -26,7 +28,7 @@ export interface BuiltApp {
 }
 
 /** Builds the handler from environment variables. See .env.example for what each one does. */
-export function buildApp(env: Env, { dev = false, fakeDataFile }: BuildOptions = {}): BuiltApp {
+export function buildApp(env: Env, { dev = false, fakeWorkspace }: BuildOptions = {}): BuiltApp {
   const missing = (name: string) => {
     throw new Error(`${name} is not set. See .env.example.`);
   };
@@ -34,8 +36,8 @@ export function buildApp(env: Env, { dev = false, fakeDataFile }: BuildOptions =
   let workspace: Workspace;
   if (env.NOTION_TOKEN) {
     workspace = new NotionWorkspace({ token: env.NOTION_TOKEN });
-  } else if (dev) {
-    workspace = new MemoryWorkspace(FAKE_USERS, fakeDataFile);
+  } else if (dev && fakeWorkspace) {
+    workspace = fakeWorkspace();
   } else {
     missing('NOTION_TOKEN');
   }

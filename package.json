@@ -12,13 +12,20 @@
     "preview": "npm run build && node scripts/serve-dist.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "worker:dev": "node scripts/worker-dev-vars.mjs && wrangler dev --port 8788",
+    "worker:deploy": "wrangler deploy",
+    "worker:secrets": "node scripts/cloudflare-secrets.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
     "happy-dom": "^21.0.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.5"
+    "vitest": "^5.0.5",
+    "wrangler": "4.147.0"
+  },
+  "overrides": {
+    "sharp": "^0.35.5"
   }
 }

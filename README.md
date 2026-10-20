@@ -89,6 +89,19 @@ npm run preview    # serves the demo with the *built* comments.js and backend
 
 With no `.env`, the backend uses **fake Notion**: data is kept in `.data/fake-notion.json`, and "Sign in with Notion" shows a pick-a-user page. In fake mode any link or short name works for `data-notion`. To use real Notion locally, fill in `.env` (see below); the demo already points at the "Prototype Feedback - Kite" page. No code changes are needed.
 
+### Hosting
+
+- **`comments.js`** is published to GitHub Pages on every push to `main` (`.github/workflows/pages.yml`). Use `https://mcorrigan89.github.io/prototype_comments/comments.js` for the latest, or `…/v<version>/comments.js` for a version that never changes.
+- **The backend** runs on Cloudflare Workers (`wrangler.jsonc`, entry `server/src/worker.ts`):
+  ```sh
+  npx wrangler login         # once
+  npm run worker:secrets     # uploads NOTION_TOKEN, NOTION_CLIENT_ID/SECRET and a SESSION_SECRET from .env
+  npm run worker:deploy      # prints the backend URL → use it as data-endpoint
+  npm run worker:dev         # the Worker in Cloudflare's local runtime, on :8788, using .env
+  ```
+  Set `ALLOWED_ORIGINS` in `wrangler.jsonc` to your prototypes' origins. Set the OAuth connection's redirect URI to `<backend URL>/auth/callback`.
+- **AWS Lambda** later: `server/src/lambda.ts` is the same handler behind a Lambda Function URL (`npm run build:server` → `server/dist/`).
+
 ### How data flows
 
 ```
@@ -138,6 +151,7 @@ server/
   src/stores/memory.ts   fake Notion for development and tests
   src/identity.ts        Notion OAuth sign-in, and the fake sign-in
   src/session.ts         HMAC-signed stateless tokens
+  src/worker.ts          Cloudflare Workers entry
   src/lambda.ts          AWS Lambda (Function URL) entry
   src/dev-entry.ts       loaded by the Vite dev server
   src/local.ts           standalone local server (npm run preview)
@@ -178,6 +192,6 @@ Each thread is one row in the prototype page's Comments database. Its replies ar
 
 ## Roadmap
 
-- Deploy script for the Lambda function (Function URL, environment variables).
+- Deploying the backend from GitHub Actions, and the move to AWS Lambda.
 - Migrating `local` exports into Notion.
 - Editing comments, unread indicators, image attachments.
