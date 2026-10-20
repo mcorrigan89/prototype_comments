@@ -31,6 +31,13 @@ export function timeAgo(iso: string): string {
 
 export const THREAD_PARAM = 'pc-thread';
 
+/** Pulls the 32-hex Notion id out of a link or id; null if there isn't one. */
+export function notionIdFrom(ref: string): string | null {
+  const path = ref.split(/[?#]/)[0].replace(/-/g, '');
+  const match = path.match(/[0-9a-f]{32}$/i) ?? path.match(/[0-9a-f]{32}/i);
+  return match ? match[0].toLowerCase() : null;
+}
+
 /** Normalised key for "which screen of the prototype is this". */
 export function pageKeyFor(mode: 'path' | 'path+hash', loc: Location | URL = location): string {
   const path = loc.pathname.replace(/\/index\.html?$/i, '/') || '/';

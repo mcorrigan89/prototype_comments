@@ -1,3 +1,4 @@
+import type { User } from '../types';
 import { h } from './dom';
 
 export interface NamePromptOptions {
@@ -64,5 +65,73 @@ export function promptForName({ container, currentName, onSave }: NamePromptOpti
 
     container.append(backdrop);
     requestAnimationFrame(() => input.focus());
+  });
+}
+
+export interface SignInPromptOptions {
+  container: HTMLElement;
+  /** Opens the sign-in popup. Called from the button's click so it isn't blocked. */
+  signIn: () => Promise<User | null>;
+  cancel: () => void;
+}
+
+/** Explains why sign-in is needed, then waits for the popup to finish. Resolves the signed-in user, or null. */
+export function promptForSignIn({ container, signIn, cancel }: SignInPromptOptions): Promise<User | null> {
+  return new Promise((resolve) => {
+    const status = h('p', { class: 'status', hidden: true });
+    const go = h('button', { class: 'btn primary notion-btn', type: 'button' }, h('span', { class: 'notion-mark' }, 'N'), 'Sign in with Notion');
+    const dismiss = h('button', { class: 'btn ghost', type: 'button' }, 'Cancel');
+    const backdrop = h(
+      'div',
+      { class: 'modal-backdrop' },
+      h(
+        'div',
+        { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pc-signin-title' },
+        h('h2', { id: 'pc-signin-title' }, 'Sign in to comment'),
+        h('p', null, 'Comments are saved to Notion. Sign in with your Notion account so your team knows who wrote them.'),
+        h('div', { class: 'actions' }, dismiss, go),
+        status,
+      ),
+    );
+
+    let settled = false;
+    const close = (user: User | null) => {
+      if (settled) return;
+      settled = true;
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey, true);
+      resolve(user);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      cancel();
+      close(null);
+    };
+
+    go.addEventListener('click', async () => {
+      go.setAttribute('disabled', '');
+      status.hidden = false;
+      status.textContent = 'Finish signing in in the Notion window…';
+      const user = await signIn();
+      if (settled) return;
+      if (user) return close(user);
+      go.removeAttribute('disabled');
+      status.textContent = 'Sign-in didn’t finish. Try again?';
+    });
+    dismiss.addEventListener('click', () => {
+      cancel();
+      close(null);
+    });
+    backdrop.addEventListener('pointerdown', (e) => {
+      if (e.target === backdrop) {
+        cancel();
+        close(null);
+      }
+    });
+    document.addEventListener('keydown', onKey, true);
+
+    container.append(backdrop);
+    requestAnimationFrame(() => go.focus());
   });
 }

@@ -4,7 +4,7 @@ import { LOG, nowIso, uid } from '../util';
 const USER_KEY = 'pc:v1:user';
 
 /** localStorage when available, an in-memory map otherwise (private mode, blocked storage). */
-function createKeyValueStore() {
+export function createKeyValueStore() {
   let usable = false;
   try {
     const probe = '__pc_probe__';
@@ -23,6 +23,10 @@ function createKeyValueStore() {
     set(key: string, value: string) {
       if (usable) localStorage.setItem(key, value);
       else memory.set(key, value);
+    },
+    remove(key: string) {
+      if (usable) localStorage.removeItem(key);
+      else memory.delete(key);
     },
   };
 }

@@ -32,10 +32,12 @@ export function createSidebar(app: App): Sidebar {
   });
 
   const storageLabel = h('span', { class: 'grow' });
+  const account = h('span', { class: 'account' });
   const foot = h(
     'div',
     { class: 'sb-foot' },
     storageLabel,
+    account,
     app.store.exportData
       ? h('button', { class: 'text-btn', type: 'button', title: 'Download all comments as JSON', onClick: () => void app.exportJson() }, icon('download', 14), 'Export')
       : null,
@@ -62,7 +64,7 @@ export function createSidebar(app: App): Sidebar {
   function item(t: Thread): HTMLElement {
     const { state } = app;
     const first = t.comments[0];
-    const replies = t.comments.length - 1;
+    const replies = app.commentCount(t) - 1;
     const onPage = t.page === state.page;
     const hidden = onPage && !app.locate(t.id, t.pin);
     return h(
@@ -129,8 +131,30 @@ export function createSidebar(app: App): Sidebar {
         ),
       );
     }
-    storageLabel.textContent = app.store.label;
+    renderFooter();
   }
+
+  function renderFooter() {
+    const { store, state } = app;
+    storageLabel.textContent = store.label;
+    storageLabel.title = store.label;
+    const parts: HTMLElement[] = [];
+    if (store.retryFailed && / not sent$/.test(store.label)) {
+      parts.push(h('button', { class: 'text-btn', type: 'button', onClick: () => void store.retryFailed!() }, 'Retry'));
+    }
+    if (store.auth === 'signin') {
+      parts.push(
+        state.user
+          ? h('button', { class: 'text-btn', type: 'button', title: `Signed in as ${state.user.name}`, onClick: () => void app.signOut() }, 'Sign out')
+          : h('button', { class: 'text-btn', type: 'button', onClick: () => void app.askSignIn() }, 'Sign in'),
+      );
+    }
+    account.replaceChildren(...parts);
+  }
+
+  setInterval(() => {
+    if (app.state.sidebarOpen) renderFooter();
+  }, 10_000);
 
   return { el, render };
 }

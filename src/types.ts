@@ -27,6 +27,10 @@ export interface Comment {
   body: string;
   mentions: User[];
   createdAt: string;
+  /** Set while a comment only exists locally: queued for sending, or rejected by the server. */
+  delivery?: 'pending' | 'failed';
+  /** Why delivery failed, shown next to the retry button. */
+  error?: string;
 }
 
 export type ThreadStatus = 'open' | 'resolved';
@@ -45,7 +49,15 @@ export interface Thread {
   updatedAt: string;
   resolvedBy?: User;
   resolvedAt?: string;
+  /**
+   * The comments loaded so far. Remote storage only sends the first comment
+   * in list syncs; the rest are fetched when the thread is opened.
+   */
   comments: Comment[];
+  /** Total number of comments, when it can exceed comments.length. */
+  commentCount?: number;
+  /** Backend id (e.g. the Notion page id) when it differs from id. */
+  remoteId?: string;
 }
 
 export interface NewThread {
@@ -77,7 +89,7 @@ export interface ExportFile {
  */
 export interface StorageAdapter {
   readonly name: string;
-  /** Short human description shown in the sidebar footer. */
+  /** Short human description shown in the sidebar footer, e.g. sync status. */
   readonly label: string;
   /**
    * How the current user is identified:
@@ -91,11 +103,23 @@ export interface StorageAdapter {
   addComment(threadId: string, input: NewComment): Promise<Comment>;
   setStatus(threadId: string, status: ThreadStatus, by: User): Promise<Thread>;
   deleteComment(threadId: string, commentId: string): Promise<void>;
+  /** Whether the current user may delete this comment. Defaults to "it's theirs". */
+  canDeleteComment?(comment: Comment): boolean;
   deleteThread(threadId: string): Promise<void>;
+  /** Fetch every comment of a thread (remote storage loads them on demand). */
+  loadComments?(threadId: string): Promise<void>;
+  /** Re-send changes that the server rejected. */
+  retryFailed?(): Promise<void>;
 
   getCurrentUser(): Promise<User | null>;
   setUserName?(name: string): Promise<User>;
+  /** Starts sign-in. Must be called from a click handler so the popup isn't blocked. */
   signIn?(): Promise<User | null>;
+  /** Gives up waiting for a sign-in started with signIn(). */
+  cancelSignIn?(): void;
+  signOut?(): Promise<void>;
+  /** A one-off message for the user (e.g. "Signed in"), consumed when read. */
+  takeNotice?(): string | null;
   listUsers(): Promise<User[]>;
 
   exportData?(): Promise<ExportFile>;
@@ -109,6 +133,8 @@ export interface AdapterOptions {
   project: string;
   users: User[];
   endpoint?: string;
+  /** The prototype's Notion feedback database (link or id), for remote storage. */
+  notion?: string;
 }
 
 export type AdapterFactory = (options: AdapterOptions) => StorageAdapter;
@@ -121,4 +147,5 @@ export interface Config {
   users: User[];
   shortcuts: boolean;
   endpoint?: string;
+  notion?: string;
 }

@@ -34,7 +34,7 @@ function boot() {
     console.warn(LOG, `Unknown storage "${config.storage}", falling back to local.`);
     factory = adapters.local;
   }
-  const app = new App(config, factory({ project: config.project, users: config.users, endpoint: config.endpoint }));
+  const app = new App(config, factory({ project: config.project, users: config.users, endpoint: config.endpoint, notion: config.notion }));
 
   const api: PublicApi = {
     version,

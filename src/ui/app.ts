@@ -4,7 +4,7 @@ import { LOG, THREAD_PARAM, clamp, cleanUrl, pageKeyFor, timeAgo, withThreadPara
 import { createComposer } from './composer';
 import { avatar, h, renderBody } from './dom';
 import { COMMENT_CURSOR, icon } from './icons';
-import { promptForName } from './modal';
+import { promptForName, promptForSignIn } from './modal';
 import { createSidebar, type Sidebar } from './sidebar';
 import css from './styles.css?inline';
 
@@ -107,11 +107,6 @@ export class App {
     this.bindPageEvents();
     this.watchNavigation();
 
-    try {
-      this.state.user = await this.store.getCurrentUser();
-    } catch (err) {
-      console.error(LOG, err);
-    }
     await this.refresh();
     this.store.subscribe(() => void this.refresh());
     this.openFromUrl();
@@ -125,15 +120,18 @@ export class App {
 
   async refresh() {
     try {
-      const [threads, users] = await Promise.all([this.store.listThreads(), this.store.listUsers()]);
+      const [threads, users, user] = await Promise.all([this.store.listThreads(), this.store.listUsers(), this.store.getCurrentUser()]);
       this.state.threads = threads.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       this.state.users = users;
+      this.state.user = user;
     } catch (err) {
       console.error(LOG, err);
       this.toast('Couldn’t load comments');
     }
     if (this.state.activeId && !this.thread(this.state.activeId)) this.state.activeId = null;
     this.render();
+    const notice = this.store.takeNotice?.();
+    if (notice) this.toast(notice);
   }
 
   thread(id: string): Thread | undefined {
@@ -152,16 +150,40 @@ export class App {
     return !!user && !!this.state.user && user.id === this.state.user.id;
   }
 
+  /** Remote storage may know there are more comments than it has loaded. */
+  commentCount(t: Thread): number {
+    return Math.max(t.commentCount ?? 0, t.comments.length);
+  }
+
   // ---------- Actions ----------
 
   async ensureUser(): Promise<boolean> {
     if (this.state.user) return true;
-    if (this.store.auth === 'signin' && this.store.signIn) {
-      this.state.user = await this.store.signIn();
-      this.render();
-      return !!this.state.user;
+    return this.store.auth === 'signin' ? this.askSignIn() : this.askName();
+  }
+
+  async askSignIn(): Promise<boolean> {
+    const { signIn } = this.store;
+    if (this.state.modalOpen || !signIn) return false;
+    this.state.modalOpen = true;
+    const user = await promptForSignIn({
+      container: this.root,
+      signIn: () => signIn.call(this.store),
+      cancel: () => this.store.cancelSignIn?.(),
+    });
+    this.state.modalOpen = false;
+    if (user) {
+      this.state.user = user;
+      await this.refresh();
     }
-    return this.askName();
+    return !!user;
+  }
+
+  async signOut() {
+    await this.store.signOut?.();
+    this.state.user = null;
+    await this.refresh();
+    this.toast('Signed out');
   }
 
   async askName(): Promise<boolean> {
@@ -218,6 +240,7 @@ export class App {
     this.renderPins();
     this.renderPopover();
     this.sidebar.render();
+    void this.store.loadComments?.(id);
   }
 
   closeThread() {
@@ -451,6 +474,7 @@ export class App {
 
   private async ensureUserOrRename() {
     if (this.store.auth === 'name') await this.askName();
+    else if (this.state.user) this.setSidebar(true); // sign out lives in the sidebar footer
     else await this.ensureUser();
   }
 
@@ -461,7 +485,7 @@ export class App {
     list.classList.toggle('active', this.state.sidebarOpen);
     badge.textContent = String(this.pageThreads().filter((t) => t.status === 'open').length);
     me.replaceChildren(this.state.user ? avatar(this.state.user, 22) : icon('user', 18));
-    me.title = this.state.user ? `Commenting as ${this.state.user.name}` : 'Set your name';
+    me.title = this.state.user ? `Commenting as ${this.state.user.name}` : this.store.auth === 'signin' ? 'Sign in to comment' : 'Set your name';
     el.classList.toggle('shifted', this.state.sidebarOpen && window.innerWidth >= 720);
   }
 
@@ -494,7 +518,7 @@ export class App {
         this.pinEls.set(id, el);
         this.layer.append(el);
       }
-      const count = t.comments.length;
+      const count = this.commentCount(t);
       el.replaceChildren(avatar(t.createdBy, 26), ...(count > 1 ? [h('span', { class: 'count' }, String(count))] : []));
       el.classList.toggle('active', id === this.state.activeId);
       el.classList.toggle('resolved', t.status === 'resolved');
@@ -607,13 +631,15 @@ export class App {
 
     const note = h('div', { class: 'orphan-note' }, 'The element this comment was pinned to isn’t visible right now.');
 
+    const notLoaded = this.commentCount(t) - t.comments.length;
     const list = h(
       'div',
       { class: 'comments' },
-      t.comments.map((c) =>
-        h(
+      t.comments.map((c, i) => {
+        const canDelete = this.isMine(c.author) && (this.store.canDeleteComment?.(c) ?? true);
+        return h(
           'div',
-          { class: 'comment' },
+          { class: `comment${c.delivery ? ` ${c.delivery}` : ''}` },
           avatar(c.author, 28),
           h(
             'div',
@@ -622,13 +648,21 @@ export class App {
               'div',
               { class: 'meta' },
               h('span', { class: 'name' }, c.author?.name ?? 'Unknown'),
-              h('span', { class: 'time', title: new Date(c.createdAt).toLocaleString() }, timeAgo(c.createdAt)),
+              h('span', { class: 'time', title: new Date(c.createdAt).toLocaleString() }, c.delivery === 'pending' ? 'Sending…' : timeAgo(c.createdAt)),
             ),
             h('div', { class: 'body' }, renderBody(c.body, c.mentions)),
+            c.delivery === 'failed'
+              ? h(
+                  'div',
+                  { class: 'delivery-error' },
+                  `Not sent${c.error ? `: ${c.error}` : ''} · `,
+                  h('button', { class: 'link', type: 'button', onClick: () => void this.store.retryFailed?.() }, 'Retry'),
+                )
+              : null,
           ),
-          this.isMine(c.author)
+          canDelete
             ? this.confirmButton(
-                'Delete comment',
+                c.delivery && i === 0 && !t.remoteId ? 'Discard comment' : 'Delete comment',
                 async () => {
                   await this.store.deleteComment(t.id, c.id);
                   await this.refresh();
@@ -636,8 +670,9 @@ export class App {
                 'del',
               )
             : null,
-        ),
-      ),
+        );
+      }),
+      notLoaded > 0 ? h('div', { class: 'loading-more' }, `Loading ${notLoaded} more…`) : null,
     );
     requestAnimationFrame(() => (list.scrollTop = list.scrollHeight));
 

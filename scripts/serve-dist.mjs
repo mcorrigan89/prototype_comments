@@ -1,10 +1,13 @@
 // Serves the demo using the *built* dist/comments.js as a classic <script defer>,
-// exactly how a prototype on S3 would load it. Run via `npm run preview`.
+// exactly how a prototype on S3 would load it, plus the built backend on :8787.
+// Run via `npm run preview`.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
+process.chdir(root);
+await import('../server/dist/local.mjs');
 const port = Number(process.env.PORT) || 4173;
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json', '.json': 'application/json' };
 
