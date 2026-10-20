@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paper Kite — Home (demo prototype)</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <script src="./people.js"></script>
+    <script type="module" src="/src/index.ts" data-project="demo-shop"></script>
+  </head>
+  <body>
+    <header>
+      <div class="logo">Paper Kite</div>
+      <nav>
+        <a href="./" class="current">Shop</a>
+        <a href="./cart.html">Cart</a>
+        <a href="#about">About</a>
+      </nav>
+      <button class="btn secondary" id="signin">Sign in</button>
+    </header>
+    <main>
+      <div class="hero">
+        <div>
+          <h1>Kites that fold into your pocket.</h1>
+          <p>Hand-made ripstop kites, ready to fly in under a minute.</p>
+          <div class="row">
+            <button class="btn" data-pc-anchor="hero-cta" id="shop-now">Shop the collection</button>
+            <button class="btn secondary" id="open-newsletter">Get 10% off</button>
+          </div>
+        </div>
+        <div class="art"></div>
+      </div>
+
+      <section>
+        <h2>Bestsellers</h2>
+        <div class="grid">
+          <div class="card"><div class="img" style="background:#ffd27a"></div><h3>The Sparrow</h3><div class="price">$39</div></div>
+          <div class="card"><div class="img" style="background:#9ad1ff"></div><h3>Night Owl</h3><div class="price">$54</div></div>
+          <div class="card"><div class="img" style="background:#b8e3b0"></div><h3>Meadow Delta</h3><div class="price">$45</div></div>
+          <div class="card"><div class="img" style="background:#f3b4ff"></div><h3>Comet Tail</h3><div class="price">$62</div></div>
+        </div>
+      </section>
+
+      <section id="about">
+        <h2>About us</h2>
+        <p>We started Paper Kite in a garage in 2019. Every kite is cut, sewn and test-flown by hand on the cliffs outside our workshop.</p>
+        <p style="height: 600px">Scroll down — pins stay attached to the elements they were left on.</p>
+      </section>
+    </main>
+    <footer>© Paper Kite · demo prototype</footer>
+
+    <div class="modal-bg" id="newsletter">
+      <div class="modal">
+        <h2>Get 10% off your first kite</h2>
+        <p>Join the newsletter for launches and windy-day alerts.</p>
+        <input class="field" placeholder="you@example.com" />
+        <div class="row">
+          <button class="btn" id="subscribe">Subscribe</button>
+          <button class="btn secondary" id="close-newsletter">No thanks</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const modal = document.getElementById('newsletter');
+      document.getElementById('open-newsletter').onclick = () => modal.classList.add('open');
+      document.getElementById('close-newsletter').onclick = () => modal.classList.remove('open');
+      document.getElementById('subscribe').onclick = () => modal.classList.remove('open');
+      document.getElementById('shop-now').onclick = () => (location.href = './cart.html');
+    </script>
+  </body>
+</html>

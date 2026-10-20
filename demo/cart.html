@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paper Kite — Cart (demo prototype)</title>
+    <link rel="stylesheet" href="./shared.css" />
+    <script src="./people.js"></script>
+    <script type="module" src="/src/index.ts" data-project="demo-shop"></script>
+  </head>
+  <body>
+    <header>
+      <div class="logo">Paper Kite</div>
+      <nav>
+        <a href="./">Shop</a>
+        <a href="./cart.html" class="current">Cart</a>
+      </nav>
+    </header>
+    <main>
+      <h1>Your cart</h1>
+      <table>
+        <thead><tr><th>Item</th><th>Qty</th><th>Price</th></tr></thead>
+        <tbody>
+          <tr><td>The Sparrow</td><td>1</td><td>$39</td></tr>
+          <tr><td>Night Owl</td><td>2</td><td>$108</td></tr>
+        </tbody>
+      </table>
+      <div class="summary">
+        <div><strong>Total</strong> $147 · Free shipping</div>
+        <button class="btn" id="checkout">Checkout</button>
+      </div>
+    </main>
+  </body>
+</html>
