@@ -10,7 +10,6 @@
     "build:client": "vite build",
     "build:server": "vite build --config vite.server.config.ts",
     "preview": "npm run build && node scripts/serve-dist.mjs",
-    "notion:setup": "node server/scripts/notion-setup.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -5,20 +5,23 @@ Figma-style comments for static frontend prototypes. Add one script tag and revi
 ```html
 <script
   src="https://…/comments.js"
-  data-notion="https://www.notion.so/acme/Checkout-v2-Feedback-1a2b3c…"
+  data-notion="https://app.notion.com/p/acme/Prototype-Feedback-Kite-3ff97c…"
   data-endpoint="https://<your-function-url>.lambda-url.<region>.on.aws"
   defer
 ></script>
 ```
 
-Each prototype's comments live in **its own Notion database**, named by `data-notion`. Every screen of the prototype shares that database, and the **Page** column tells screens apart. Comments are read and written through a small, stateless backend (`server/`, one AWS Lambda function). Anyone who can open the prototype can read its comments. Commenting requires "Sign in with Notion", so every comment is attributed to a verified person.
+Each prototype has **its own Notion page**, named by `data-notion`. Its comments go into a **Comments** database inside that page, which is created automatically on the first comment. Every screen of the prototype shares it, and the **Page** column tells screens apart. Comments are read and written through a small, stateless backend (`server/`, one AWS Lambda function). Anyone who can open the prototype can read its comments. Commenting requires "Sign in with Notion", so every comment is attributed to a verified person.
 
 ### Adding comments to a new prototype
 
-1. In Notion, inside the **hub page** (e.g. "Prototype Feedback"), duplicate any existing feedback database and rename it. Or run `npm run notion:setup -- "Checkout v2"`, which creates one and prints the script tag.
-2. Copy the database's link into `data-notion` and add the tag to the prototype's `<head>`.
+1. Create a page in Notion for the prototype, anywhere you like.
+2. On that page: **••• → Connections →** add the integration. This is what lets the backend use it.
+3. Copy the page's link (••• → Copy link) into `data-notion` and add the tag to the prototype's `<head>`.
 
-The backend only accepts databases inside the hub page that have the expected columns, so a script tag can't point it anywhere else.
+You can write notes on the page as usual. The Comments database appears below them after the first comment. A link straight to an existing Comments database also works.
+
+The backend can only see pages someone has connected to the integration, and it only writes to a database with the comment columns. So a script tag can't point it anywhere else.
 
 A browser-only mode with no backend is also available: use `data-storage="local"` and `data-project` instead of `data-notion`.
 
@@ -42,7 +45,7 @@ Set these on the script tag:
 
 | Attribute | Default | |
 | --- | --- | --- |
-| `data-notion` | | The prototype's Notion feedback database (link or id). Turns on Notion storage. |
+| `data-notion` | | The prototype's Notion page (link or id). Turns on Notion storage. |
 | `data-endpoint` | | Backend URL, required with `data-notion`. |
 | `data-storage` | `remote` with `data-notion`, else `local` | `local` keeps comments in this browser only. |
 | `data-project` | hostname | Groups comments in `local` mode. |
@@ -82,13 +85,13 @@ npm run build      # → dist/comments.js (single IIFE) and server/dist/ (Lambda
 npm run preview    # serves the demo with the *built* comments.js and backend
 ```
 
-With no `.env`, the backend uses **fake Notion**: data is kept in `.data/fake-notion.json`, and "Sign in with Notion" shows a pick-a-user page. In fake mode `data-notion` can be any short name (the demo uses `data-notion="demo-shop"`). To use real Notion locally, fill in `.env` (see below) and point the demo's `data-notion` at a real feedback database. No code changes are needed.
+With no `.env`, the backend uses **fake Notion**: data is kept in `.data/fake-notion.json`, and "Sign in with Notion" shows a pick-a-user page. In fake mode any link or short name works for `data-notion`. To use real Notion locally, fill in `.env` (see below); the demo already points at the "Prototype Feedback - Kite" page. No code changes are needed.
 
 ### How data flows
 
 ```
 comments.js                          server/ (Lambda, stateless)                    Notion
- local copy ◄── sync every 20s ──── GET  /threads?db=…&since=…  ── 1 query ────► this prototype's database
+ local copy ◄── sync every 20s ──── GET  /threads?db=…&since=…  ── 1 query ────► Comments database in the page
  outbox ─────── send in order ─────► POST /threads, /threads/:id/comments ──────► rows + comments
                                      PATCH/DELETE /threads/:id
  sign-in popup ───────────────────► /auth/start → Notion OAuth → /auth/callback
@@ -98,16 +101,15 @@ comments.js                          server/ (Lambda, stateless)                
 - The overlay always renders from a **local copy** in the browser, so it's instant and works offline.
 - **Writes** apply locally right away and go into an **outbox** that's sent in order, retried with backoff and kept across reloads. A rejected write shows "Not sent · Retry".
 - Syncs ask only for threads **changed since the last sync**, with a full sync every 5 minutes to catch deletions. A thread's full comments are fetched when it's opened, which also picks up replies made directly in Notion.
-- The backend holds the Notion credentials and sets the author from the verified session, so nobody can post as someone else. It only touches feedback databases inside the hub page, and it remembers each check for 10 minutes. It has no database of its own.
+- The backend holds the Notion credentials and sets the author from the verified session, so nobody can post as someone else. It only touches pages connected to the integration, and only writes to their Comments database. It remembers which database a link points to for 10 minutes. It has no database of its own.
 
 ### Connecting real Notion
 
-You need workspace admin rights for steps 1 and 3.
+You need workspace admin rights for steps 1 and 2.
 
 1. **Internal integration** (reads and writes the data): [notion.so/profile/integrations](https://www.notion.so/profile/integrations) → New integration → *Internal*. Enable *Read content, Update content, Insert content, Read comments, Insert comments,* and *Read user information including email addresses*. Copy its secret into `NOTION_TOKEN` in `.env`.
-2. **Hub page:** create a page such as "Prototype Feedback", then use its ••• menu → *Connections* → add the integration. Everything created inside it later is automatically accessible. Put its link in `NOTION_HUB_PAGE_ID`, then create the first feedback database with `npm run notion:setup -- "<prototype name>"`.
-3. **Public integration** (only for "Sign in with Notion"): New integration → *Public*. Set the redirect URI to `<API URL>/auth/callback` (locally `http://localhost:8787/auth/callback`). Copy the OAuth client ID and secret into `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET`. The access token Notion returns is discarded; it's only used to learn who signed in. Only members of your workspace can sign in.
-4. Set `SESSION_SECRET` (e.g. `openssl rand -base64 32`) and `ALLOWED_ORIGINS` (your prototypes' origins).
+2. **Public integration** (only for "Sign in with Notion"): New integration → *Public*. Set the redirect URI to `<API URL>/auth/callback` (locally `http://localhost:8787/auth/callback`). Copy the OAuth client ID and secret into `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET`. The access token Notion returns is discarded; it's only used to learn who signed in. Only members of your workspace can sign in.
+3. Set `SESSION_SECRET` (e.g. `openssl rand -base64 32`) and `ALLOWED_ORIGINS` (your prototypes' origins).
 
 See `.env.example` for every setting.
 
@@ -130,14 +132,13 @@ src/                     the overlay (comments.js)
   ui/                    overlay UI (shadow DOM)
 server/
   src/handler.ts         routes, auth, validation; runtime-agnostic
-  src/stores/notion.ts   Notion API (data sources, version 2026-03-11) and the hub-page check
+  src/stores/notion.ts   Notion API (data sources, version 2026-03-11): finds or creates each page's Comments database
   src/stores/memory.ts   fake Notion for development and tests
   src/identity.ts        Notion OAuth sign-in, and the fake sign-in
   src/session.ts         HMAC-signed stateless tokens
   src/lambda.ts          AWS Lambda (Function URL) entry
   src/dev-entry.ts       loaded by the Vite dev server
   src/local.ts           standalone local server (npm run preview)
-  scripts/notion-setup.ts  creates a prototype's feedback database
 demo/                    a small multi-page prototype to try it on
 test/                    unit tests
 ```
@@ -146,7 +147,7 @@ The overlay renders inside a shadow root attached to `<html>`, so the prototype'
 
 ## Data model
 
-Each thread is one row in the prototype's Notion database. Its replies are Notion comments on that row.
+Each thread is one row in the prototype page's Comments database. Its replies are Notion comments on that row.
 
 | Column | Type | Holds |
 | --- | --- | --- |

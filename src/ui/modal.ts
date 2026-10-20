@@ -89,6 +89,7 @@ export function promptForSignIn({ container, signIn, cancel }: SignInPromptOptio
         { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'pc-signin-title' },
         h('h2', { id: 'pc-signin-title' }, 'Sign in to comment'),
         h('p', null, 'Comments are saved to Notion. Sign in with your Notion account so your team knows who wrote them.'),
+        h('p', null, 'Notion will ask you to pick a page to share. Pick any one: sign-in is only used to know who you are, and nothing on that page is read.'),
         h('div', { class: 'actions' }, dismiss, go),
         status,
       ),

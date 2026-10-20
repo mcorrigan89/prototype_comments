@@ -248,7 +248,8 @@ export function createRemoteAdapter({ project, endpoint, notion }: AdapterOption
     } catch (err) {
       if (!(err instanceof ApiError)) throw err;
       if (err.status === 0) status.online = false;
-      else if (err.status === 401) status.readError = err.message;
+      // 4xx: something the user can fix (sign in, connect the page), so show it in the sidebar.
+      else if (err.status >= 400 && err.status < 500) status.readError = err.message;
       else console.warn(LOG, 'sync failed:', err.message);
     }
     emit();

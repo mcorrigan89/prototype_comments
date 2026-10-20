@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { NotionWorkspace, PROPS, SCHEMA, fromRichText, pageToThread, toRichText } from '../../server/src/stores/notion';
+import { DATABASE_PROPERTIES, NotionWorkspace, PROPS, SCHEMA, TABLE_LAYOUT, fromRichText, pageToThread, toRichText } from '../../server/src/stores/notion';
 import { pin } from './helpers';
 
 const ana = { id: 'u-ana', name: 'Ana Ruiz' };
@@ -74,9 +74,8 @@ describe('pageToThread', () => {
   });
 });
 
-const DB = 'a'.repeat(32);
-const HUB = 'b'.repeat(32);
-const FOLDER = 'c'.repeat(32);
+const PAGE = 'a'.repeat(32); // the prototype's page, as linked in data-notion
+const DB = 'b'.repeat(32); // the comments database inside it
 const schema = Object.fromEntries(Object.entries(SCHEMA).map(([name, type]) => [name, { type }]));
 
 function mockNotion(responses: Record<string, unknown>) {
@@ -87,65 +86,119 @@ function mockNotion(responses: Record<string, unknown>) {
     const key = `${init.method} ${path.split('?')[0]}`;
     return new Response(JSON.stringify(responses[key] ?? { code: 'object_not_found', message: 'nope' }), { status: key in responses ? 200 : 404 });
   });
-  return { calls, workspace: new NotionWorkspace({ token: 't', hubPageId: `https://www.notion.so/acme/Hub-${HUB}?pvs=4`, fetch: fetchImpl as unknown as typeof fetch }) };
+  return { calls, workspace: new NotionWorkspace({ token: 't', fetch: fetchImpl as unknown as typeof fetch }) };
 }
 
-/** A feedback database two levels under the hub: Hub → Folder → database. */
-const tree = {
-  [`GET /databases/${DB}`]: { id: DB, parent: { type: 'page_id', page_id: FOLDER }, data_sources: [{ id: 'ds-1' }] },
-  [`GET /pages/${FOLDER}`]: { id: FOLDER, parent: { type: 'page_id', page_id: HUB } },
+const pageLink = `https://app.notion.com/p/govwell/Prototype-Feedback-Kite-${PAGE}?source=copy_link`;
+/** A shared page with a comments database already inside it. */
+const pageWithComments = {
+  [`GET /pages/${PAGE}`]: { id: PAGE },
+  [`GET /blocks/${PAGE}/children`]: { results: [{ id: 'para', type: 'paragraph' }, { id: DB, type: 'child_database' }], has_more: false, next_cursor: null },
+  [`GET /databases/${DB}`]: { id: DB, data_sources: [{ id: 'ds-1' }] },
   'GET /data_sources/ds-1': { properties: schema },
 };
 
 describe('NotionWorkspace', () => {
-  it('opens a feedback database anywhere under the hub page, from a link', async () => {
-    const { workspace } = mockNotion(tree);
-    const store = await workspace.open(`https://www.notion.so/acme/Checkout-Feedback-${DB}?v=123`);
-    expect(store.id).toBe(DB);
+  it('finds the comments database inside a prototype page', async () => {
+    const { workspace } = mockNotion(pageWithComments);
+    const store = await workspace.open(pageLink);
+    expect(store.id).toBe(PAGE);
   });
 
-  it('refuses databases outside the hub page', async () => {
-    const { workspace } = mockNotion({ ...tree, [`GET /pages/${FOLDER}`]: { id: FOLDER, parent: { type: 'workspace', workspace: true } } });
-    await expect(workspace.open(DB)).rejects.toThrow(/isn’t inside the hub page/);
+  it('reads a page with no comments yet as empty, without creating anything', async () => {
+    const { workspace, calls } = mockNotion({
+      [`GET /pages/${PAGE}`]: { id: PAGE },
+      [`GET /blocks/${PAGE}/children`]: { results: [], has_more: false, next_cursor: null },
+    });
+    const store = await workspace.open(pageLink);
+    expect(await store.listThreads()).toEqual([]);
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
   });
 
-  it('refuses databases without the expected columns', async () => {
-    const { workspace } = mockNotion({ ...tree, 'GET /data_sources/ds-1': { properties: { Feedback: { type: 'title' } } } });
-    await expect(workspace.open(DB)).rejects.toThrow(/missing columns: Page \(rich_text\)/);
+  it('creates the comments database inside the page on the first write', async () => {
+    const { workspace, calls } = mockNotion({
+      [`GET /pages/${PAGE}`]: { id: PAGE },
+      [`GET /blocks/${PAGE}/children`]: { results: [], has_more: false, next_cursor: null },
+      'POST /databases': { id: DB, data_sources: [{ id: 'ds-1' }] },
+      'GET /data_sources/ds-1': { properties: Object.fromEntries(Object.entries(schema).map(([n, p], i) => [n, { ...p, id: `p${i}` }])) },
+      'GET /views': { results: [{ id: 'view-1' }], has_more: false, next_cursor: null },
+      'PATCH /views/view-1': { id: 'view-1' },
+    });
+    await workspace.open(pageLink); // a read first: cached as empty
+    const store = await workspace.open(pageLink, { create: true });
+    const create = calls.find((c) => c.method === 'POST' && c.path === '/databases')!;
+    expect(create.body.parent).toEqual({ type: 'page_id', page_id: PAGE });
+    expect(create.body.title[0].text.content).toBe('Comments');
+    expect(Object.keys(create.body.initial_data_source.properties).sort()).toEqual(Object.keys(SCHEMA).sort());
+    expect(create.body.is_inline).toBe(true);
+    expect(store.id).toBe(PAGE);
+
+    // The table is arranged for people: useful columns first, machine data hidden.
+    const view = calls.find((c) => c.method === 'PATCH' && c.path === '/views/view-1')!.body.configuration.properties;
+    const ids = Object.fromEntries(Object.keys(schema).map((n, i) => [`p${i}`, n]));
+    expect(view.slice(0, 3).map((p: any) => ids[p.property_id])).toEqual([PROPS.title, PROPS.status, PROPS.reviewer]);
+    expect(view.filter((p: any) => !p.visible).map((p: any) => ids[p.property_id])).toEqual([PROPS.pin, PROPS.clientId]);
   });
 
-  it('refuses links that are not databases the integration can see', async () => {
+  it('skips databases in the page that are not comments databases', async () => {
+    const { workspace, calls } = mockNotion({
+      ...pageWithComments,
+      'GET /data_sources/ds-1': { properties: { Name: { type: 'title' } } },
+      'POST /databases': { id: 'c'.repeat(32), data_sources: [{ id: 'ds-2' }] },
+      'GET /data_sources/ds-2': { properties: schema },
+    });
+    await workspace.open(pageLink, { create: true });
+    expect(calls.filter((c) => c.method === 'POST' && c.path === '/databases')).toHaveLength(1);
+  });
+
+  it('accepts a link straight to a comments database', async () => {
+    const { workspace } = mockNotion({ [`GET /databases/${DB}`]: { id: DB, data_sources: [{ id: 'ds-1' }] }, 'GET /data_sources/ds-1': { properties: schema } });
+    expect((await workspace.open(DB)).id).toBe(DB);
+  });
+
+  it('rejects a database link without the comment columns', async () => {
+    const { workspace } = mockNotion({ [`GET /databases/${DB}`]: { id: DB, data_sources: [{ id: 'ds-1' }] }, 'GET /data_sources/ds-1': { properties: {} } });
+    await expect(workspace.open(DB)).rejects.toThrow(/doesn’t have the comment columns/);
+  });
+
+  it('explains how to connect a page the integration can’t see', async () => {
     const { workspace } = mockNotion({});
-    await expect(workspace.open(DB)).rejects.toThrow(/can’t be used/);
-    await expect(workspace.open('not a link')).rejects.toThrow(/Notion database link/);
+    await expect(workspace.open(pageLink)).rejects.toThrow(/Connections/);
+    await expect(workspace.open('not a link')).rejects.toThrow(/Notion page link/);
   });
 
-  it('checks a database once, then reuses it', async () => {
-    const { workspace, calls } = mockNotion(tree);
-    await workspace.open(DB);
-    await workspace.open(DB);
-    expect(calls.filter((c) => c.path === `/databases/${DB}`)).toHaveLength(1);
+  it('resolves a link once, then reuses it', async () => {
+    const { workspace, calls } = mockNotion(pageWithComments);
+    await workspace.open(pageLink);
+    await workspace.open(pageLink);
+    expect(calls.filter((c) => c.path.startsWith(`/blocks/${PAGE}`))).toHaveLength(1);
   });
+});
+
+it('creates databases with every column the backend checks for, and lays all of them out', () => {
+  const created = Object.fromEntries(Object.entries(DATABASE_PROPERTIES).map(([name, def]) => [name, Object.keys(def)[0]]));
+  expect(created).toEqual(SCHEMA);
+  expect(TABLE_LAYOUT.map((c) => c.name).sort()).toEqual(Object.keys(SCHEMA).sort());
 });
 
 describe('NotionStore', () => {
   it('only returns rows from its own data source', async () => {
-    const { workspace } = mockNotion({ ...tree, 'GET /pages/page-1': notionPage({ parent: { type: 'data_source_id', data_source_id: 'other' } }) });
-    expect(await (await workspace.open(DB)).getThread('page-1')).toBeNull();
+    const { workspace } = mockNotion({ ...pageWithComments, 'GET /pages/page-1': notionPage({ parent: { type: 'data_source_id', data_source_id: 'other' } }) });
+    expect(await (await workspace.open(pageLink)).getThread('page-1')).toBeNull();
   });
 
   it('treats trashed rows as missing', async () => {
-    const { workspace } = mockNotion({ ...tree, 'GET /pages/page-1': notionPage({ in_trash: true }) });
-    expect(await (await workspace.open(DB)).getThread('page-1')).toBeNull();
+    const { workspace } = mockNotion({ ...pageWithComments, 'GET /pages/page-1': notionPage({ in_trash: true }) });
+    expect(await (await workspace.open(pageLink)).getThread('page-1')).toBeNull();
   });
 
   it('creates a row, then posts the first comment under the reviewer’s name', async () => {
     const { calls, workspace } = mockNotion({
-      ...tree,
+      ...pageWithComments,
       'POST /pages': notionPage({ properties: { ...notionPage().properties, [PROPS.status]: { select: { name: 'Open' } } } }),
       'POST /comments': { id: 'c1', created_time: '2026-10-20T10:00:00.000Z', created_by: { id: 'bot' }, rich_text: rt('Make it bolder'), display_name: { type: 'custom', resolved_name: 'Ana Ruiz' } },
     });
-    const store = await workspace.open(DB);
+    const store = await workspace.open(pageLink);
     calls.length = 0;
     const t = await store.createThread({ clientId: 'client-1', page: '/', url: '', pin, body: 'Make it bolder', mentions: [], author: ana });
 
@@ -155,6 +208,6 @@ describe('NotionStore', () => {
     expect(calls[1].body.display_name).toEqual({ type: 'custom', custom: { name: 'Ana Ruiz' } });
     expect(t.comments[0].author).toEqual(ana);
     expect(t.status).toBe('open');
-    expect(t.project).toBe(DB);
+    expect(t.project).toBe(PAGE);
   });
 });

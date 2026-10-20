@@ -32,21 +32,21 @@ export function buildApp(env: Env, { dev = false, fakeDataFile }: BuildOptions =
   };
 
   let workspace: Workspace;
-  if (env.NOTION_TOKEN && env.NOTION_HUB_PAGE_ID) {
-    workspace = new NotionWorkspace({ token: env.NOTION_TOKEN, hubPageId: env.NOTION_HUB_PAGE_ID });
+  if (env.NOTION_TOKEN) {
+    workspace = new NotionWorkspace({ token: env.NOTION_TOKEN });
   } else if (dev) {
     workspace = new MemoryWorkspace(FAKE_USERS, fakeDataFile);
   } else {
-    missing(env.NOTION_TOKEN ? 'NOTION_HUB_PAGE_ID' : 'NOTION_TOKEN');
+    missing('NOTION_TOKEN');
   }
 
   let identity: Identity;
   if (env.NOTION_CLIENT_ID && env.NOTION_CLIENT_SECRET) {
     identity = notionIdentity(env.NOTION_CLIENT_ID, env.NOTION_CLIENT_SECRET);
   } else if (dev) {
-    // Fake sign-in only makes sense against fake data: real Notion needs real user ids.
-    if (workspace! instanceof NotionWorkspace) missing('NOTION_CLIENT_ID / NOTION_CLIENT_SECRET (needed with a real NOTION_TOKEN)');
-    identity = fakeIdentity(FAKE_USERS);
+    // Pick-a-person sign-in. With real Notion it lists the workspace's real members,
+    // so you can try everything with just the internal integration. Never in production.
+    identity = fakeIdentity(() => workspace!.listUsers());
   } else {
     missing('NOTION_CLIENT_ID');
   }
@@ -56,7 +56,8 @@ export function buildApp(env: Env, { dev = false, fakeDataFile }: BuildOptions =
 
   const config: AppConfig = {
     sessionSecret,
-    allowedOrigins: list(env.ALLOWED_ORIGINS ?? (dev ? 'http://localhost:5173,http://localhost:4173' : '')),
+    // `||`, not `??`: a blank line in .env (ALLOWED_ORIGINS=) means "not set".
+    allowedOrigins: list(env.ALLOWED_ORIGINS || (dev ? 'http://localhost:5173,http://localhost:4173' : '')),
     privateDatabases: new Set(list(env.PRIVATE_DATABASES)),
     publicUrl: env.PUBLIC_URL || undefined,
     sessionDays: Number(env.SESSION_DAYS) || 30,

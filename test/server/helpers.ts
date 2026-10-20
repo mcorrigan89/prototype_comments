@@ -14,7 +14,7 @@ export function setup({ members = FAKE_USERS, signInUsers = FAKE_USERS, config =
   const workspace = new MemoryWorkspace(members);
   const handler = createHandler({
     workspace,
-    identity: fakeIdentity(signInUsers),
+    identity: fakeIdentity(async () => signInUsers),
     config: {
       sessionSecret: 'test-secret-0123456789',
       allowedOrigins: [PROTOTYPE, 'http://localhost:3000'],

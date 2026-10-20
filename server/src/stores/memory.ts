@@ -48,7 +48,7 @@ export class MemoryWorkspace implements Workspace {
 
   async open(ref: string): Promise<Store> {
     const id = notionIdFrom(ref) ?? (SLUG_RE.test(ref) ? ref : null);
-    if (!id) throw badRequest('data-notion should be a Notion database link');
+    if (!id) throw badRequest('data-notion should be a Notion page link');
     return new MemoryStore(id, this.rows, () => this.save());
   }
 

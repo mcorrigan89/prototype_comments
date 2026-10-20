@@ -4,17 +4,18 @@ import type { Comment, Thread, ThreadStatus, User } from '../../src/types';
 export { notionIdFrom } from '../../src/util';
 
 /**
- * Where everything lives. Each prototype has its own feedback database, named
- * by the script tag's data-notion; open() checks it's one of ours and returns
- * its store. NotionWorkspace is the real one; MemoryWorkspace stands in for
- * Notion during local development and tests.
+ * Where everything lives. Each prototype's comments live under the Notion page
+ * named by its script tag's data-notion; open() finds them. NotionWorkspace is
+ * the real one; MemoryWorkspace stands in for Notion during local development
+ * and tests.
  */
 export interface Workspace {
   /**
-   * Resolves a database reference from a script tag (a Notion link or id).
-   * Throws an HttpError if it isn't a usable feedback database.
+   * Resolves a script tag's data-notion (a Notion link or id) to its comments.
+   * With `create`, sets up storage if there isn't any yet; without it, a page
+   * with no comments yet reads as empty. Throws an HttpError if the link can't be used.
    */
-  open(db: string): Promise<Store>;
+  open(db: string, options?: { create?: boolean }): Promise<Store>;
   /** Workspace members: who can sign in and be @mentioned. */
   listUsers(): Promise<User[]>;
 }
@@ -26,7 +27,7 @@ export interface Workspace {
  * comment and `commentCount` the total. Full comments come from listComments().
  */
 export interface Store {
-  /** Normalised id of the database, used as Thread.project. */
+  /** Normalised id from the data-notion link, used as Thread.project. */
   readonly id: string;
   listThreads(since?: string): Promise<Thread[]>;
   /** null if it doesn't exist, was deleted, or isn't in this database. */

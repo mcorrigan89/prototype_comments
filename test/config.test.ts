@@ -32,3 +32,14 @@ describe('findScriptTag', () => {
     script.remove();
   });
 });
+
+describe('notionIdFrom', () => {
+  it('reads ids from every Notion link format', async () => {
+    const { notionIdFrom } = await import('../src/util');
+    const id = '3ff97c7e2fc18018a96bcdb995ef3416';
+    expect(notionIdFrom(`https://app.notion.com/p/govwell/Prototype-Feedback-Kite-${id}?source=copy_link`)).toBe(id);
+    expect(notionIdFrom(`https://www.notion.so/govwell/Feedback-${id}?v=0123456789abcdef0123456789abcdef`)).toBe(id);
+    expect(notionIdFrom('3ff97c7e-2fc1-8018-a96b-cdb995ef3416')).toBe(id);
+    expect(notionIdFrom('demo-shop')).toBeNull();
+  });
+});

@@ -6,7 +6,7 @@ export const NOTION_API = 'https://api.notion.com/v1';
 /** 2025-09-03 introduced data sources; 2026-03-11 renamed `archived` to `in_trash`. */
 export const NOTION_VERSION = '2026-03-11';
 
-/** Column names in a feedback database (see server/scripts/notion-setup.ts). */
+/** Column names in a comments database (created by NotionWorkspace, see DATABASE_PROPERTIES). */
 export const PROPS = {
   title: 'Feedback',
   page: 'Page',
@@ -36,13 +36,51 @@ export const SCHEMA: Record<(typeof PROPS)[keyof typeof PROPS], string> = {
 
 export const STATUS_NAMES: Record<ThreadStatus, string> = { open: 'Open', resolved: 'Resolved' };
 
+/** How a new comments database's table looks in Notion: column order and widths, then hidden columns. */
+export const TABLE_LAYOUT: { name: string; width?: number; wrap?: boolean; hidden?: boolean }[] = [
+  { name: PROPS.title, width: 360, wrap: true },
+  { name: PROPS.status, width: 110 },
+  { name: PROPS.reviewer, width: 170 },
+  { name: PROPS.page, width: 140 },
+  { name: PROPS.count, width: 90 },
+  { name: PROPS.mentioned, width: 170 },
+  { name: PROPS.resolvedBy, width: 170 },
+  { name: PROPS.link, width: 200 },
+  // Machine data: the overlay needs these, people reading Notion don't.
+  { name: PROPS.pin, hidden: true },
+  { name: PROPS.clientId, hidden: true },
+];
+
+/** Column definitions used when creating a comments database. Must satisfy SCHEMA. */
+export const DATABASE_PROPERTIES = {
+  [PROPS.title]: { title: {} },
+  [PROPS.status]: {
+    select: {
+      options: [
+        { name: STATUS_NAMES.open, color: 'yellow' },
+        { name: STATUS_NAMES.resolved, color: 'green' },
+      ],
+    },
+  },
+  [PROPS.reviewer]: { people: {} },
+  [PROPS.mentioned]: { people: {} },
+  [PROPS.resolvedBy]: { people: {} },
+  [PROPS.page]: { rich_text: {} },
+  [PROPS.link]: { url: {} },
+  [PROPS.count]: { number: { format: 'number' } },
+  [PROPS.pin]: { rich_text: {} },
+  [PROPS.clientId]: { rich_text: {} },
+};
+
 const TEXT_LIMIT = 2000; // per rich-text object
 const RICH_TEXT_ITEMS = 100; // per array
 const USERS_TTL_MS = 10 * 60 * 1000;
-/** How long a checked database link stays trusted before it's checked again. */
+/** How long a resolved data-notion link is reused before it's checked again. */
 const DATABASE_TTL_MS = 10 * 60 * 1000;
-/** How far up the page tree to look for the hub page. */
-const MAX_DEPTH = 8;
+/** A page with no comments database yet is re-checked sooner, so new comments show up. */
+const EMPTY_TTL_MS = 30 * 1000;
+/** Title of the database the backend creates inside a prototype's page. */
+export const DATABASE_TITLE = 'Comments';
 
 export class NotionError extends Error {
   constructor(
@@ -222,88 +260,143 @@ export function notionRequest(token: string, fetchImpl: Fetch = fetch) {
 
 type Request = ReturnType<typeof notionRequest>;
 
-interface NotionParent {
-  type: string;
-  page_id?: string;
-  block_id?: string;
-  database_id?: string;
-  data_source_id?: string;
+interface NotionDatabase {
+  id: string;
+  in_trash?: boolean;
+  data_sources?: { id: string }[];
 }
 
 export interface NotionWorkspaceOptions {
   token: string;
-  /** The page every feedback database must live under. */
-  hubPageId: string;
   fetch?: Fetch;
 }
 
 /**
- * Resolves data-notion links to feedback databases. The link comes from a script
- * tag anyone can edit, so each one is checked before use: it must be a database
- * somewhere under the hub page, with the expected columns.
+ * Resolves data-notion links. A link can be:
+ *
+ * - a regular page (the usual case): its comments live in a "Comments" database
+ *   inside it, which is created on the first comment;
+ * - a comments database directly.
+ *
+ * The integration only sees pages someone deliberately connected to it
+ * (••• → Connections), and the backend only ever writes rows to a database with
+ * the comment columns, so a script tag can't point it at anything else.
  */
 export class NotionWorkspace implements Workspace {
   private readonly request: Request;
-  private readonly hubPageId: string;
-  private readonly databases = new Map<string, { at: number; store: Promise<NotionStore> }>();
+  private readonly resolved = new Map<string, { at: number; ttl: number; store: Promise<Store> }>();
   private users: { at: number; list: User[] } | null = null;
 
-  constructor({ token, hubPageId, fetch: fetchImpl }: NotionWorkspaceOptions) {
+  constructor({ token, fetch: fetchImpl }: NotionWorkspaceOptions) {
     this.request = notionRequest(token, fetchImpl);
-    const hub = notionIdFrom(hubPageId);
-    if (!hub) throw new Error('NOTION_HUB_PAGE_ID must be a Notion page link or id');
-    this.hubPageId = hub;
   }
 
-  open(ref: string): Promise<Store> {
+  open(ref: string, { create = false } = {}): Promise<Store> {
     const id = notionIdFrom(ref);
-    if (!id) return Promise.reject(badRequest('data-notion should be a Notion database link'));
-    const cached = this.databases.get(id);
-    if (cached && Date.now() - cached.at < DATABASE_TTL_MS) return cached.store;
-    const store = this.check(id);
-    this.databases.set(id, { at: Date.now(), store });
-    store.catch(() => this.databases.delete(id)); // don't remember failures
+    if (!id) return Promise.reject(badRequest('data-notion should be a Notion page link'));
+    const cached = this.resolved.get(id);
+    if (cached && Date.now() - cached.at < cached.ttl) {
+      // A cached "no comments yet" can't take a write: look again, creating if needed.
+      return create ? cached.store.then((s) => (s instanceof EmptyStore ? this.resolve(id, true) : s)) : cached.store;
+    }
+    return this.resolve(id, create);
+  }
+
+  private resolve(id: string, create: boolean): Promise<Store> {
+    const store = this.find(id, create);
+    const entry = { at: Date.now(), ttl: DATABASE_TTL_MS, store };
+    this.resolved.set(id, entry);
+    store.then(
+      (s) => {
+        if (s instanceof EmptyStore) entry.ttl = EMPTY_TTL_MS;
+      },
+      () => this.resolved.delete(id), // don't remember failures
+    );
     return store;
   }
 
-  private async check(id: string): Promise<NotionStore> {
-    const notUsable = (why: string) => new HttpError(404, `That Notion link can’t be used for comments: ${why}`, 'not_found');
+  private async find(id: string, create: boolean): Promise<Store> {
+    const cantSee = () =>
+      new HttpError(404, 'The backend can’t see that Notion page. In Notion, open it and use ••• → Connections to add the integration.', 'not_found');
 
-    let database: { id: string; parent: NotionParent; in_trash?: boolean; data_sources?: { id: string }[] };
-    try {
-      database = await this.request('GET', `/databases/${id}`);
-    } catch (err) {
-      if (err instanceof NotionError && (err.status === 404 || err.status === 400)) {
-        throw notUsable('it isn’t a database the integration can see. Is it inside the hub page?');
-      }
-      throw err;
+    // A link straight to a comments database.
+    const database = await this.tryGet<NotionDatabase>(`/databases/${id}`);
+    if (database) {
+      if (database.in_trash) throw cantSee();
+      const store = await this.storeFor(id, database);
+      if (!store) throw badRequest(`That Notion database doesn’t have the comment columns. Link the prototype’s page instead, and the backend will set one up.`);
+      return store;
     }
-    if (database.in_trash) throw notUsable('the database is in the trash');
-    if (!(await this.isUnderHub(database.parent))) throw notUsable('the database isn’t inside the hub page');
 
-    const dataSourceId = database.data_sources?.[0]?.id;
-    if (!dataSourceId) throw notUsable('the database has no data source');
-    const source: { properties: Record<string, { type: string }> } = await this.request('GET', `/data_sources/${dataSourceId}`);
-    const missing = Object.entries(SCHEMA)
-      .filter(([name, type]) => source.properties[name]?.type !== type)
-      .map(([name, type]) => `${name} (${type})`);
-    if (missing.length) throw notUsable(`it’s missing columns: ${missing.join(', ')}. Duplicate an existing feedback database, or use npm run notion:setup.`);
+    // A regular page: find (or create) the comments database inside it.
+    const page = await this.tryGet<{ in_trash?: boolean; archived?: boolean }>(`/pages/${id}`);
+    if (!page || page.in_trash || page.archived) throw cantSee();
+    for (const childId of await this.childDatabases(id)) {
+      const child = await this.tryGet<NotionDatabase>(`/databases/${childId}`);
+      const store = child && !child.in_trash ? await this.storeFor(id, child) : null;
+      if (store) return store;
+    }
+    if (!create) return new EmptyStore(id);
 
-    return new NotionStore(this.request, normalizeId(database.id), dataSourceId, () => this.listUsers());
+    const created: NotionDatabase = await this.request('POST', '/databases', {
+      parent: { type: 'page_id', page_id: id },
+      title: [{ type: 'text', text: { content: DATABASE_TITLE } }],
+      icon: { type: 'emoji', emoji: '💬' },
+      // Shown as a table right on the prototype's page, not as a link to a separate page.
+      is_inline: true,
+      initial_data_source: { properties: DATABASE_PROPERTIES },
+    });
+    const store = await this.storeFor(id, created);
+    if (!store) throw new Error('Created a comments database but it doesn’t match the expected columns');
+    await this.arrangeTable(created).catch((err) => console.warn('Couldn’t arrange the comments table (cosmetic only):', err));
+    return store;
   }
 
-  /** Walks up the page tree looking for the hub page. */
-  private async isUnderHub(parent: NotionParent | undefined): Promise<boolean> {
-    for (let depth = 0; parent && depth < MAX_DEPTH; depth++) {
-      const id = parent.page_id ?? parent.block_id ?? parent.database_id;
-      if (!id) return false; // reached the workspace root
-      if (parent.type === 'page_id' && normalizeId(id) === this.hubPageId) return true;
-      const path = parent.type === 'page_id' ? 'pages' : parent.type === 'block_id' ? 'blocks' : parent.type === 'database_id' ? 'databases' : null;
-      if (!path) return false;
-      const next: { parent?: NotionParent } = await this.request('GET', `/${path}/${id}`);
-      parent = next.parent;
+  /** Orders, sizes and hides columns in the new database's default view. */
+  private async arrangeTable(database: NotionDatabase) {
+    const dataSourceId = database.data_sources![0].id;
+    const source: { properties: Record<string, { id: string }> } = await this.request('GET', `/data_sources/${dataSourceId}`);
+    const views: ListResult<{ id: string }> = await this.request('GET', `/views?${new URLSearchParams({ database_id: database.id })}`);
+    const view = views.results[0];
+    if (!view) return;
+    const properties = TABLE_LAYOUT.filter((col) => source.properties[col.name]).map((col) => ({
+      property_id: source.properties[col.name].id,
+      visible: !col.hidden,
+      ...(col.width ? { width: col.width } : {}),
+      ...(col.wrap ? { wrap: true } : {}),
+    }));
+    await this.request('PATCH', `/views/${view.id}`, { name: 'All comments', configuration: { type: 'table', properties } });
+  }
+
+  /** A store for this database if it has the comment columns, else null. */
+  private async storeFor(id: string, database: NotionDatabase): Promise<NotionStore | null> {
+    const dataSourceId = database.data_sources?.[0]?.id;
+    if (!dataSourceId) return null;
+    const source: { properties: Record<string, { type: string }> } = await this.request('GET', `/data_sources/${dataSourceId}`);
+    const matches = Object.entries(SCHEMA).every(([name, type]) => source.properties[name]?.type === type);
+    return matches ? new NotionStore(this.request, id, dataSourceId, () => this.listUsers()) : null;
+  }
+
+  private async childDatabases(pageId: string): Promise<string[]> {
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const params = new URLSearchParams({ page_size: '100', ...(cursor ? { start_cursor: cursor } : {}) });
+      const res: ListResult<{ id: string; type: string }> = await this.request('GET', `/blocks/${pageId}/children?${params}`);
+      for (const block of res.results) if (block.type === 'child_database') ids.push(block.id);
+      cursor = res.has_more ? res.next_cursor : null;
+    } while (cursor);
+    return ids;
+  }
+
+  /** GET that treats "not found / no access" as null. */
+  private async tryGet<T>(path: string): Promise<T | null> {
+    try {
+      return await this.request<T>('GET', path);
+    } catch (err) {
+      if (err instanceof NotionError && (err.status === 404 || err.status === 400)) return null;
+      throw err;
     }
-    return false;
   }
 
   async listUsers() {
@@ -320,6 +413,28 @@ export class NotionWorkspace implements Workspace {
     this.users = { at: Date.now(), list };
     return list;
   }
+}
+
+/** A prototype page that has no comments yet. Reads are empty; writes go through open(…, { create: true }). */
+class EmptyStore implements Store {
+  constructor(readonly id: string) {}
+  async listThreads() {
+    return [];
+  }
+  async getThread() {
+    return null;
+  }
+  async findByClientId() {
+    return null;
+  }
+  private nothingHere(): never {
+    throw new HttpError(404, 'That thread no longer exists', 'not_found');
+  }
+  createThread = async (): Promise<Thread> => this.nothingHere();
+  setStatus = async (): Promise<Thread> => this.nothingHere();
+  trashThread = async (): Promise<void> => this.nothingHere();
+  listComments = async (): Promise<Comment[]> => this.nothingHere();
+  addComment = async (): Promise<Comment[]> => this.nothingHere();
 }
 
 /** One prototype's feedback database. */

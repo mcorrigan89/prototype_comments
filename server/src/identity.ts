@@ -36,15 +36,18 @@ export function notionIdentity(clientId: string, clientSecret: string, fetchImpl
   };
 }
 
-/** Local development: a "pick a user" page served by the handler at /auth/fake. */
-export function fakeIdentity(users: User[]): Identity {
+/**
+ * Local development: a "pick a user" page served by the handler at /auth/fake,
+ * listing `users` (fake people, or with a real NOTION_TOKEN, the workspace's real members).
+ */
+export function fakeIdentity(users: () => Promise<User[]>): Identity {
   return {
     kind: 'fake',
     authorizeUrl(state, redirectUri) {
       return `${redirectUri.replace(/\/auth\/callback$/, '/auth/fake')}?${new URLSearchParams({ state })}`;
     },
     async exchange(code) {
-      const user = users.find((u) => u.id === code);
+      const user = (await users()).find((u) => u.id === code);
       if (!user) throw new Error(`Unknown fake user ${code}`);
       return user;
     },

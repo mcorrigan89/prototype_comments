@@ -81,12 +81,12 @@ export function createHandler({ workspace, identity, config }: AppDeps): Handler
     if (privateDatabases.has(store.id) && !currentUser(req)) throw unauthorized('Sign in to view these comments');
   }
 
-  /** The prototype's feedback database, from ?db= (the script tag's data-notion). */
-  async function database(req: ApiRequest): Promise<Store> {
+  /** The prototype's comments, from ?db= (the script tag's data-notion). */
+  async function database(req: ApiRequest, { create = false } = {}): Promise<Store> {
     const ref = req.query.get('db');
     if (!ref) throw badRequest('db is required (the script tag’s data-notion)');
     if (ref.length > 300) throw badRequest('db is too long');
-    return workspace.open(ref);
+    return workspace.open(ref, { create });
   }
 
   function readJson<T>(req: ApiRequest): Partial<T> {
@@ -240,7 +240,7 @@ export function createHandler({ workspace, identity, config }: AppDeps): Handler
       200,
       page(
         'Sign in (fake Notion)',
-        `<p>Local development: pick who you want to be. With real Notion credentials this is Notion's sign-in screen.</p>${links}
+        `<p>Local development: pick who you want to be. In production this is Notion's sign-in screen.</p>${links}
          <a class="cancel" href="${escapeHtml(`${baseUrl(req)}/auth/callback?${new URLSearchParams({ error: 'access_denied', state })}`)}">Cancel</a>`,
       ),
     );
@@ -264,7 +264,8 @@ export function createHandler({ workspace, identity, config }: AppDeps): Handler
   async function createThread(req: ApiRequest): Promise<ApiResponse> {
     const author = requireUser(req);
     const body = readJson<CreateThreadBody>(req);
-    const store = await database(req);
+    // Only a signed-in write may create the comments database.
+    const store = await database(req, { create: true });
     const input: CreateThreadBody = {
       clientId: text(body.clientId, 'clientId', 64),
       page: text(body.page, 'page', 500),
