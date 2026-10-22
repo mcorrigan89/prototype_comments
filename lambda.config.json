@@ -1,0 +1,11 @@
+{
+  "region": "us-east-2",
+  "functionName": "prototype-comments",
+  "roleName": "prototype-comments-lambda",
+  "memoryMb": 256,
+  "timeoutSeconds": 20,
+  "vars": {
+    "ALLOWED_ORIGINS": "http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com,https://mcorrigan89.github.io",
+    "PRIVATE_DATABASES": ""
+  }
+}

@@ -3,17 +3,17 @@
 Figma-style comments for static prototypes hosted on S3. There are two parts:
 
 - **`comments.js`** is the overlay (`src/`). It's built by Vite into a single IIFE and served from GitHub Pages.
-- **The backend** (`server/`) is a stateless API on Cloudflare Workers. It reads and writes Notion and handles "Sign in with Notion".
+- **The backend** (`server/`) is a stateless API. It reads and writes Notion and handles "Sign in with Notion". The same handler runs on **Cloudflare Workers** (live today) or **AWS Lambda** (the planned home; see [AWS Lambda](#aws-lambda)).
 
 `README.md` covers usage, configuration, the data model and the code layout. This file covers **setting it up and operating it**: Notion, sign-in, deploying, and adding it to a prototype. It also lists the mistakes we've already made once.
 
 ## Ground rules
 
 - **Never print, echo, log or paste secret values.** That includes `.env`, `.dev.vars`, and the output of commands that might contain them. To check that a value is set, test for it without showing it, e.g. `grep -c '^NOTION_TOKEN=.' .env`. If the user pastes a secret into chat, tell them it only needs to go in `.env`.
-- Secrets live in `.env` (git-ignored) locally and in Cloudflare Worker secrets in production. Nowhere else.
+- Secrets live in `.env` (git-ignored) locally and in production either in Cloudflare Worker secrets or in the Lambda function's environment variables. Nowhere else.
 - **`.env.example` is committed and must stay blank.** Only keys and comments go in it, never values.
-- `SESSION_SECRET` for production exists **only in Cloudflare**, not in `.env`. Running `npm run worker:secrets` with no arguments generates a new one, which **signs everyone out**. To update other secrets, name them, e.g. `npm run worker:secrets -- NOTION_CLIENT_ID NOTION_CLIENT_SECRET`.
-- Commit and push only when the user asks.
+- `SESSION_SECRET` for production exists **only in Cloudflare / the Lambda's settings**, not in `.env`. On Lambda, `lambda:deploy` keeps the existing one unless you pass `--rotate-session`. On Cloudflare, running `npm run worker:secrets` with no arguments generates a new one, which **signs everyone out**. To update other secrets, name them, e.g. `npm run worker:secrets -- NOTION_CLIENT_ID NOTION_CLIENT_SECRET`.
+- Commit and push only when the user asks. Deploying, or creating anything in AWS or Cloudflare, also needs the user's go-ahead. The AWS CLI on this machine is signed in to a shared company account.
 - `wrangler` is pinned to an exact version on purpose. Don't let `npm audit fix` or upgrades move it to a release that's only days old.
 
 ## Commands
@@ -28,6 +28,8 @@ npm run preview        # demo using the built comments.js and backend, on :4173
 npm run worker:dev     # the Worker in Cloudflare's local runtime on :8788 (writes .dev.vars from .env)
 npm run worker:deploy  # deploys the backend
 npm run worker:secrets [-- KEY ...]   # uploads secrets from .env to Cloudflare (see ground rules)
+npm run lambda:local   # the built Lambda bundle on :8789, as Function URL events, using .env
+npm run lambda:deploy  # creates or updates the Lambda + Function URL (see AWS Lambda)
 ```
 
 Run `npm run typecheck && npm test` after changes.
@@ -38,7 +40,7 @@ Run `npm run typecheck && npm test` after changes.
 prototype on S3 ──<script src=comments.js data-notion=… data-endpoint=…>
        │
        ▼
-Cloudflare Worker (server/src/worker.ts → handler.ts)
+Cloudflare Worker (server/src/worker.ts) or Lambda Function URL (server/src/lambda.ts) → handler.ts
   ├─ NOTION_TOKEN          internal connection: reads/writes the Comments database in each prototype's page
   ├─ NOTION_CLIENT_ID/…    OAuth connection: sign-in only, learns who you are, token discarded
   └─ SESSION_SECRET        signs session tokens (HMAC); no database of its own
@@ -93,6 +95,31 @@ After editing `wrangler.jsonc`, redeploy.
 - `https://mcorrigan89.github.io/prototype_comments/comments.js` is the latest build.
 - `https://mcorrigan89.github.io/prototype_comments/v<version>/comments.js` is pinned to `package.json`'s version.
 
+### 5. AWS Lambda (alternative backend)
+
+<a id="aws-lambda"></a>The same backend runs as one Lambda function behind a public **Function URL**. There's no API Gateway, S3 bucket or database. `scripts/lambda-deploy.mjs` uses the AWS CLI and is safe to re-run:
+
+```sh
+aws sso login --profile <profile>   # if the session expired; export AWS_PROFILE=<profile> to pick one
+npm run lambda:local                # first: the exact bundle that will be uploaded, on :8789
+npm run lambda:deploy               # build, zip, create or update, then print the URL and its health
+```
+
+- **Settings:** `lambda.config.json` holds the region (default `us-east-2`, same as the prototypes), function and role names, memory, timeout, `ALLOWED_ORIGINS` and `PRIVATE_DATABASES`. Keep `ALLOWED_ORIGINS` in step with `wrangler.jsonc` while both backends exist.
+- **Secrets:** `NOTION_TOKEN`, `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` come from `.env` and become the function's environment variables, which are encrypted at rest. They're passed through a private temp file, never on the command line or in the output. `SESSION_SECRET` is generated on the first deploy and kept after that.
+- **The first deploy creates:**
+  - IAM role `prototype-comments-lambda`, with CloudWatch Logs only (`AWSLambdaBasicExecutionRole`).
+  - Function `prototype-comments` on `nodejs22.x`, arm64.
+  - A Function URL with auth `NONE`, plus the two resource-policy statements AWS requires for a public URL (`lambda:InvokeFunctionUrl`, and `lambda:InvokeFunction` with `--invoked-via-function-url`).
+- **No CORS on the Function URL.** The handler sends its own CORS headers, checked against `ALLOWED_ORIGINS`. Turning on Function URL CORS would duplicate them.
+- **After the first deploy:**
+  - Add `<function URL>/auth/callback` as a redirect URI on the Notion OAuth connection.
+  - Use the URL (without the trailing slash) as `data-endpoint`.
+  - Lambda signs people in with its own `SESSION_SECRET`, so moving prototypes from Cloudflare to Lambda means signing in once more.
+- **Package:** `server/dist/lambda.mjs` imports shared code from `server/dist/assets/`, so the zip contains both. It has no `node_modules`; everything is bundled.
+- **Logs:** `aws logs tail /aws/lambda/prototype-comments --follow --region us-east-2`.
+- **Tear down:** delete the function (which removes its URL), then detach the policy and delete the role.
+
 ## Adding comments to a prototype
 
 1. Create a Notion page for the prototype or feature, in the workspace with the connections.
@@ -140,16 +167,19 @@ The dev API prints which mode it's in: `real Notion` or `fake Notion`, and `noti
 | “The backend can’t see that Notion page” | The internal connection isn't added to that page (••• → Connections). |
 | Notion OAuth: `redirect_uri` error | The callback URL isn't listed on the OAuth connection (setup step 2.3). |
 | `MemcachedCrossCellError` when adding a connection | The connection belongs to or spans another workspace. Restrict it to this workspace. |
-| “… isn't an allowed prototype origin” | The prototype's origin isn't in `ALLOWED_ORIGINS`; add it to `wrangler.jsonc` and redeploy. |
+| “… isn't an allowed prototype origin” | The prototype's origin isn't in `ALLOWED_ORIGINS`; add it to `wrangler.jsonc` / `lambda.config.json` and redeploy. |
 | “Only members of the workspace can comment” | The person isn't a member (guests aren't in the users list). |
 | Everyone got signed out | `SESSION_SECRET` changed, probably because `worker:secrets` ran with no arguments. |
 | Comments silently stay in localStorage | The script tag wasn't found or `data-notion` is missing, so it fell back to `local`. |
-| New OAuth client not picked up | Upload just those two secrets (see ground rules). Locally, restart `npm run dev`. |
+| New OAuth client not picked up | Cloudflare: upload just those two secrets (see ground rules). Lambda: re-run `lambda:deploy`. Locally: restart `npm run dev`. |
+| `lambda:deploy`: `ExpiredToken` / `UnrecognizedClient` | The AWS SSO session expired: `aws sso login --profile <profile>`. |
+| Lambda URL returns 403 `Forbidden` for everything | A resource-policy statement for the Function URL is missing. Re-run `lambda:deploy`; it adds whichever is missing. |
+| Lambda: `Cannot find module …/assets/…` | The zip only had `lambda.mjs`. The deploy script ships `assets/` too; don't zip by hand. |
 
 ## Code notes
 
 - Notion API version is `2026-03-11` (data sources). Query via `POST /data_sources/:id/query`, create rows with a `data_source_id` parent, and use `in_trash`. Keep to this version.
 - The Notion API can't post as a user. Comments are posted by the internal connection with `display_name: custom` set to the signed-in person. The **Reviewer** column holds the real person.
-- `server/src/handler.ts` doesn't depend on any runtime. Runtime entries are `worker.ts`, `lambda.ts` (planned move to AWS) and `local.ts`/`dev-entry.ts`. Don't import `node:fs` or `stores/memory.ts` from anything the Worker bundles.
+- `server/src/handler.ts` doesn't depend on any runtime. Runtime entries are `worker.ts`, `lambda.ts` (`functionUrlHandler`, tested in `test/server/lambda.test.ts`) and `local.ts`/`dev-entry.ts`. Don't import `node:fs` or `stores/memory.ts` from anything the Worker bundles.
 - `comments.js` must not export anything at runtime. The IIFE global would overwrite `window.PrototypeComments`, which pages use for config.
 - Tests use happy-dom. The dev API Vite plugin is skipped under `VITEST`.

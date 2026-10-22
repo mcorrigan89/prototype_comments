@@ -15,7 +15,9 @@
     "test:watch": "vitest",
     "worker:dev": "node scripts/worker-dev-vars.mjs && wrangler dev --port 8788",
     "worker:deploy": "wrangler deploy",
-    "worker:secrets": "node scripts/cloudflare-secrets.mjs"
+    "worker:secrets": "node scripts/cloudflare-secrets.mjs",
+    "lambda:local": "npm run build:server && node scripts/lambda-local.mjs",
+    "lambda:deploy": "node scripts/lambda-deploy.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
