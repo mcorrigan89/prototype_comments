@@ -13,7 +13,8 @@
     // Origins of the prototypes allowed to use the backend and receive sign-in tokens, comma-separated.
     // `*` matches one part of a hostname (never a dot). Anyone can create an S3 bucket whose name fits
     // the pattern, so this trusts the naming convention; a domain you own would close that gap.
-    "ALLOWED_ORIGINS": "http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com,https://mcorrigan89.github.io",
+    // localhost:5173 lets prototypes use Notion comments from their Vite dev server.
+    "ALLOWED_ORIGINS": "http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com,https://mcorrigan89.github.io,http://localhost:5173,http://127.0.0.1:5173",
     "PRIVATE_DATABASES": ""
   }
 }

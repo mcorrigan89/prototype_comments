@@ -5,7 +5,7 @@
   "memoryMb": 256,
   "timeoutSeconds": 20,
   "vars": {
-    "ALLOWED_ORIGINS": "http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com,https://mcorrigan89.github.io",
+    "ALLOWED_ORIGINS": "http://govwell-*-prototype.s3-website.us-east-2.amazonaws.com,https://mcorrigan89.github.io,http://localhost:5173,http://127.0.0.1:5173",
     "PRIVATE_DATABASES": ""
   }
 }

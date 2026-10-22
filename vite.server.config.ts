@@ -13,7 +13,8 @@ export default defineConfig({
         lambda: 'server/src/lambda.ts',
         local: 'server/src/local.ts',
       },
-      output: { format: 'es', entryFileNames: '[name].mjs' },
+      // .mjs for shared chunks too: Lambda has no package.json "type": "module", so .js would load as CommonJS.
+      output: { format: 'es', entryFileNames: '[name].mjs', chunkFileNames: 'assets/[name]-[hash].mjs' },
     },
   },
   ssr: {

@@ -112,11 +112,12 @@ npm run lambda:deploy               # build, zip, create or update, then print t
   - Function `prototype-comments` on `nodejs22.x`, arm64.
   - A Function URL with auth `NONE`, plus the two resource-policy statements AWS requires for a public URL (`lambda:InvokeFunctionUrl`, and `lambda:InvokeFunction` with `--invoked-via-function-url`).
 - **No CORS on the Function URL.** The handler sends its own CORS headers, checked against `ALLOWED_ORIGINS`. Turning on Function URL CORS would duplicate them.
+- **Deployed:** `https://x24ui4mlbbnn3y4nvqo7cwxnmi0ejzcj.lambda-url.us-east-2.on.aws`, in account `805873255838` (AWS profile `admin`, GovWell SSO), region `us-east-2`. The script deploys to whichever account `AWS_PROFILE` points at, and prints it first.
 - **After the first deploy:**
   - Add `<function URL>/auth/callback` as a redirect URI on the Notion OAuth connection.
   - Use the URL (without the trailing slash) as `data-endpoint`.
   - Lambda signs people in with its own `SESSION_SECRET`, so moving prototypes from Cloudflare to Lambda means signing in once more.
-- **Package:** `server/dist/lambda.mjs` imports shared code from `server/dist/assets/`, so the zip contains both. It has no `node_modules`; everything is bundled.
+- **Package:** `server/dist/lambda.mjs` imports shared code from `server/dist/assets/*.mjs`, so the zip contains both. Chunks must stay `.mjs`: the zip has no `package.json`, so Lambda would load a `.js` chunk as CommonJS. Local Node detects ES modules on its own, so this only fails on AWS. It has no `node_modules`; everything is bundled.
 - **Logs:** `aws logs tail /aws/lambda/prototype-comments --follow --region us-east-2`.
 - **Tear down:** delete the function (which removes its URL), then detach the policy and delete the role.
 
@@ -174,6 +175,7 @@ The dev API prints which mode it's in: `real Notion` or `fake Notion`, and `noti
 | New OAuth client not picked up | Cloudflare: upload just those two secrets (see ground rules). Lambda: re-run `lambda:deploy`. Locally: restart `npm run dev`. |
 | `lambda:deploy`: `ExpiredToken` / `UnrecognizedClient` | The AWS SSO session expired: `aws sso login --profile <profile>`. |
 | Lambda URL returns 403 `Forbidden` for everything | A resource-policy statement for the Function URL is missing. Re-run `lambda:deploy`; it adds whichever is missing. |
+| Lambda 502, log says `does not provide an export named …` | A chunk was built as `.js`. Keep `chunkFileNames` as `.mjs` in `vite.server.config.ts`. |
 | Lambda: `Cannot find module …/assets/…` | The zip only had `lambda.mjs`. The deploy script ships `assets/` too; don't zip by hand. |
 
 ## Code notes
